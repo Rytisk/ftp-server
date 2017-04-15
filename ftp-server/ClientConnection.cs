@@ -22,7 +22,14 @@ namespace ftp_server
 
         private StreamReader _dataReader;
         private StreamWriter _dataWriter;
-       
+
+
+
+        private class DataConnectionOperation
+        {
+            public Func<NetworkStream, string, string> Operation { get; set; }
+            public string Arguments { get; set; }
+        }
 
         private IPEndPoint _dataEndpoint;
 
@@ -56,6 +63,8 @@ namespace ftp_server
             _writer.Flush();
 
             string line = null;
+
+            _dataClient = new TcpClient();
 
             Console.WriteLine("starting the server");
 
@@ -124,8 +133,9 @@ namespace ftp_server
                         response = "502 Command not implemented";
                         break;
                 }
+                
 
-                if(_client == null || !_client.Connected)
+                if (_client == null || !_client.Connected)
                 {
                     break;
                 }
@@ -139,8 +149,171 @@ namespace ftp_server
                         break;
                     }
                 }
-            }
+                            }
         }
+
+        #region asd
+
+        private string AList(string pathname)
+        {
+            pathname = NormalizeFilename(pathname);
+
+            if (pathname != null)
+            {
+                var state = new DataConnectionOperation { Arguments = pathname, Operation = ListOperation };
+
+                SetupDataConnectionOperation(state);
+
+                return string.Format("150 Opening mode data transfer for LIST");
+            }
+
+            return "450 Requested file action not taken";
+        }
+
+        private void HandleAsyncResult(IAsyncResult result)
+        {
+            _dataClient = _passiveListener.EndAcceptTcpClient(result);
+        }
+
+        private void SetupDataConnectionOperation(DataConnectionOperation state)
+        {
+            _passiveListener.BeginAcceptTcpClient(DoDataConnectionOperation, state);
+        }
+
+        private void HandleStuff()
+        {
+            _passiveListener.BeginAcceptTcpClient(AcceptStuff, _passiveListener);
+        }
+
+        private void AcceptStuff(IAsyncResult res)
+        {
+            HandleStuff();
+            TcpClient cl = _passiveListener.EndAcceptTcpClient(res);
+        }
+
+        private void DoDataConnectionOperation(IAsyncResult result)
+        {
+            HandleStuff();
+
+            HandleAsyncResult(result);
+
+            DataConnectionOperation op = result.AsyncState as DataConnectionOperation;
+
+            string response;
+
+            using (NetworkStream dataStream = _dataClient.GetStream())
+            {
+                response = op.Operation(dataStream, op.Arguments);
+            }
+
+            _dataClient.Close();
+            _dataClient = null;
+
+            _writer.WriteLine(response);
+            _writer.Flush();
+        }
+
+        private string ListOperation(NetworkStream dataStream, string pathname)
+        {
+            StreamWriter dataWriter = new StreamWriter(dataStream, Encoding.ASCII);
+
+            IEnumerable<string> directories = Directory.EnumerateDirectories(pathname);
+
+            foreach (string dir in directories)
+            {
+                DirectoryInfo d = new DirectoryInfo(dir);
+
+                string date = d.LastWriteTime < DateTime.Now - TimeSpan.FromDays(180) ?
+                    d.LastWriteTime.ToString("MMM dd  yyyy") :
+                    d.LastWriteTime.ToString("MMM dd HH:mm");
+
+                string line = string.Format("drwxr-xr-x    2 2003     2003     {0,8} {1}", "4096", d.Name);
+
+                dataWriter.WriteLine(line);
+                dataWriter.Flush();
+            }
+
+            IEnumerable<string> files = Directory.EnumerateFiles(pathname);
+
+            foreach (string file in files)
+            {
+                FileInfo f = new FileInfo(file);
+
+                string date = f.LastWriteTime < DateTime.Now - TimeSpan.FromDays(180) ?
+                    f.LastWriteTime.ToString("MMM dd  yyyy") :
+                    f.LastWriteTime.ToString("MMM dd HH:mm");
+
+                string line = string.Format("-rw-r--r--    2 2003     2003     {0,8} {1}", f.Length, f.Name);
+
+                dataWriter.WriteLine(line);
+                dataWriter.Flush();
+            }
+
+            dataWriter.Close();
+            return "226 Transfer complete";
+        }
+
+        private string ARetrieve(string pathname)
+        {
+            pathname = NormalizeFilename(pathname);
+
+            if (pathname != null)
+            {
+                if (File.Exists(pathname))
+                {
+                    var state = new DataConnectionOperation { Arguments = pathname, Operation = RetrieveOperation };
+
+                    SetupDataConnectionOperation(state);
+
+                    return string.Format("150 Opening mode data transfer for RETR");
+                }
+            }
+
+            return "550 File Not Found";
+        }
+
+        private string AStore(string pathname)
+        {
+            pathname = NormalizeFilename(pathname);
+
+            if (pathname != null)
+            {
+                var state = new DataConnectionOperation { Arguments = pathname, Operation = StoreOperation };
+
+                SetupDataConnectionOperation(state);
+
+                return string.Format("150 Opening mode data transfer for STOR");
+            }
+
+            return "450 Requested file action not taken";
+        }
+
+        private string RetrieveOperation(NetworkStream dataStream, string pathname)
+        {
+            long bytes = 0;
+
+            using (FileStream fs = new FileStream(pathname, FileMode.Open, FileAccess.Read))
+            {
+                bytes = CopyStream(fs, dataStream);
+            }
+
+            return "226 Closing data connection, file transfer successful";
+        }
+
+        private string StoreOperation(NetworkStream dataStream, string pathname)
+        {
+            long bytes = 0;
+
+            using (FileStream fs = new FileStream(pathname, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan))
+            {
+                bytes = CopyStream(dataStream, fs);
+            }
+
+            return "226 Closing data connection, file transfer successful";
+        }
+
+        #endregion
+
 
         private string NormalizeFilename(string path)
         {
@@ -176,8 +349,7 @@ namespace ftp_server
 
             if(pathname != null)
             {
-                _dataClient = _passiveListener.AcceptTcpClient();
-                HandleList(pathname);
+                _passiveListener.BeginAcceptTcpClient(HandleList, pathname);
 
                 return string.Format("150 Opening mode data transfer for LIST");
             }
@@ -185,9 +357,11 @@ namespace ftp_server
             return "450 Requested file action not taken";
         }
 
-        private void HandleList(string pathname)
+        private void HandleList(IAsyncResult res)
         {
+            string pathname = res.AsyncState as string;
 
+            _dataClient = _passiveListener.EndAcceptTcpClient(res);
 
             using (NetworkStream stream = _dataClient.GetStream())
             {
@@ -439,6 +613,34 @@ namespace ftp_server
             return string.Format("227 Entering Passive Mode ({0},{1},{2},{3},{4},{5})", address[0], address[1], address[2], address[3], portArray[0], portArray[1]);
         }
 
+        private void RunPassive()
+        {
+            while(true)
+            _dataClient = _passiveListener.AcceptTcpClient();
+        }
+
+        private string MPassive()
+        {
+            IPAddress localAddress = ((IPEndPoint)_client.Client.LocalEndPoint).Address;
+
+            _passiveListener = new TcpListener(localAddress, 0);
+            _passiveListener.Start();
+
+            
+
+            IPEndPoint passiveListenerEndpoint = (IPEndPoint)_passiveListener.LocalEndpoint;
+
+            byte[] address = passiveListenerEndpoint.Address.GetAddressBytes();
+            short port = (short)passiveListenerEndpoint.Port;
+
+            byte[] portArray = BitConverter.GetBytes(port);
+
+            if (BitConverter.IsLittleEndian)
+                Array.Reverse(portArray);
+
+            return string.Format("227 Entering Passive Mode ({0},{1},{2},{3},{4},{5})", address[0], address[1], address[2], address[3], portArray[0], portArray[1]);
+        }
+
         private string CheckUsername(string username)
         {
             _username = username;
@@ -452,7 +654,7 @@ namespace ftp_server
 
             if (true)
             {
-                _root = "C:\\";
+                _root = "E:\\";
                 _currentDirectory = _root;
                 return "230 User logged in";
             }

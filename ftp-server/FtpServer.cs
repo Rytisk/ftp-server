@@ -24,8 +24,9 @@ namespace ftp_server
         public void Start(int _port)
         {
             port = _port;
-            thread = new Thread(ThreadRun);
-            thread.Start();
+            //   thread = new Thread(ThreadRun);
+            // thread.Start();
+            ThreadRun();
         }
 
         public void Stop()
@@ -47,11 +48,9 @@ namespace ftp_server
                 while(run)
                 {
                     TcpClient socket = null;
-                    Console.WriteLine("socket");
                     try
                     {
                         socket = socketListen.AcceptTcpClient();
-                        Console.WriteLine("socket");
                     }
                     catch(SocketException)
                     {
@@ -66,9 +65,11 @@ namespace ftp_server
                         else
                         {
 
-                             ClientConnection clientConnection = new ClientConnection(socket);
+                            ClientConnection clientConnection = new ClientConnection(socket);
 
-                             clientConnection.Start();
+                            //clientConnection.HandleClient();
+
+                            clientConnection.Start();
                           
                         }
                     }
