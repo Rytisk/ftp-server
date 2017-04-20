@@ -82,7 +82,7 @@ namespace ftp_server
                 if (string.IsNullOrWhiteSpace(argument))
                     argument = null;
 
-                switch(cmd)
+                switch (cmd)
                 {
                     case "USER":
                         response = CheckUsername(argument);
@@ -90,19 +90,11 @@ namespace ftp_server
                     case "PASS":
                         response = CheckPassword(argument);
                         break;
-                    case "ACCT":
-                        break;
                     case "CWD":
                         response = ChangeWorkingDirectory(argument);
                         break;
                     case "CDUP":
                         response = ChangeWorkingDirectory("..");
-                        break;
-                    case "SMNT":
-                        response = "502 Command not implemented";
-                        break;
-                    case "REIN":
-                        response = "502 Command not implemented";
                         break;
                     case "QUIT":
                         response = "221 Service closing control connection";
@@ -129,11 +121,20 @@ namespace ftp_server
                     case "STOR":
                         response = Store(argument);
                         break;
+                    case "DELE":
+                        response = Delete(argument);
+                        break;
+                    case "MKD":
+                        response = MakeDirectory(argument);
+                        break;
+                    case "RMD":
+                        response = RemoveDirectoyy(argument);
+                        break;
                     default:
                         response = "502 Command not implemented";
                         break;
                 }
-                
+
 
                 if (_client == null || !_client.Connected)
                 {
@@ -149,7 +150,7 @@ namespace ftp_server
                         break;
                     }
                 }
-                            }
+            }
         }
 
         private string NormalizeFilename(string path)
@@ -199,10 +200,73 @@ namespace ftp_server
             {
                 _passiveListener.BeginAcceptTcpClient(HandleList, pathname);
 
-                return string.Format("150 Opening mode data transfer for LIST");
+                return "150 Opening Passive mode data transfer for LIST";
             }
 
             return "450 Requested file action not taken";
+        }
+
+        private string Delete(string pathname)
+        {
+            pathname = NormalizeFilename(pathname);
+
+            if(pathname != null)
+            {
+                if(File.Exists(pathname))
+                {
+                    File.Delete(pathname);
+                }
+                else
+                {
+                    return "550 File not found";
+                }
+
+                return "250 Requested file action okay, completed";
+            }
+
+            return "550 File not found";
+        }
+
+        private string RemoveDirectoyy(string pathname)
+        {
+            pathname = NormalizeFilename(pathname);
+
+            if(pathname != null)
+            {
+                if(Directory.Exists(pathname))
+                {
+                    Directory.Delete(pathname);
+                }
+                else
+                {
+                    return "550 Directory not found";
+                }
+
+                return "250 Requested directory action okay, comlpeted";
+            }
+
+            return "550 Directory not found";
+        }
+
+        private string MakeDirectory(string pathname)
+        {
+            pathname = NormalizeFilename(pathname);
+            
+            if(pathname != null)
+            {
+                if(!Directory.Exists(pathname))
+                {
+                    Directory.CreateDirectory(pathname);
+                }
+                else
+                {
+                    return "550 Directory already exists";
+                }
+
+                return "250 Requested directory action okay, completed";
+            }
+
+            return "550 Directory not created";
         }
 
         private void HandleList(IAsyncResult res)
@@ -225,8 +289,7 @@ namespace ftp_server
                     string date = d.LastWriteTime < DateTime.Now - TimeSpan.FromDays(180) ?
                     d.LastWriteTime.ToString("MMM dd yyyy") :
                     d.LastWriteTime.ToString("MMM dd HH:mm");
-
-                    //string line = string.Format("drwxr-xr-x 2 2003 2003 {0,8} {1} {2}", "4096", date, d.Name);
+                    
                     string line = string.Format("drwxr-xr-x 2 2003 2003 {0,8} {1}", "4096",  d.Name);
                     _dataWriter.WriteLine(line);
                     _dataWriter.Flush();
@@ -242,8 +305,7 @@ namespace ftp_server
                     string date = f.LastWriteTime < DateTime.Now - TimeSpan.FromDays(180) ?
                         f.LastWriteTime.ToString("MMM dd  yyyy") :
                         f.LastWriteTime.ToString("MMM dd HH:mm");
-
-                    //string line = string.Format("-rw-r--r--    2 2003     2003     {0,8} {1} {2}", f.Length, date, f.Name);
+                    
                     string line = string.Format("-rw-r--r--    2 2003     2003     {0,8} {1}", f.Length, f.Name);
 
                     _dataWriter.WriteLine(line);
@@ -258,6 +320,26 @@ namespace ftp_server
             _writer.Flush();
         }
 
+        private void HandleRetrieve(IAsyncResult res)
+        {
+            string pathname = res.AsyncState as string;
+
+            _dataClient = _passiveListener.EndAcceptTcpClient(res);
+
+            using (NetworkStream dataStream = _dataClient.GetStream())
+            {
+                using (FileStream fs = new FileStream(pathname, FileMode.Open, FileAccess.Read))
+                {
+                    CopyStream(fs, dataStream);
+                }
+            }
+            _dataClient.Close();
+            _dataClient = null;
+
+            _writer.WriteLine("226 Closing data connection, file transfer succesful");
+            _writer.Flush();
+        }
+
         private string Retrieve(string pathname)
         {
             pathname = NormalizeFilename(pathname);
@@ -266,24 +348,10 @@ namespace ftp_server
             {
                 if(File.Exists(pathname))
                 {
-                    _dataClient = _passiveListener.AcceptTcpClient();
-
-                    using (NetworkStream dataStream = _dataClient.GetStream())
-                    {
-                        using (FileStream fs = new FileStream(pathname, FileMode.Open, FileAccess.Read))
-                        {
-                            CopyStream(fs, dataStream);
-                        }
-                    }
-                    _dataClient.Close();
-                    _dataClient = null;
-
-                   // _writer.WriteLine("226 Closing data connection, file transfer succesful");
-                   // _writer.Flush();
-                    return "226 Closing data connection, file transfer succesful";
+                    _passiveListener.BeginAcceptTcpClient(HandleRetrieve, pathname);
+                    return "150 Opening Passive mode data transfer for RETR";
                 }
             }
-
             return "550 File Not Found";
         }
 
@@ -293,23 +361,32 @@ namespace ftp_server
 
             if (pathname != null)
             {
-                _dataClient = _passiveListener.AcceptTcpClient();
+                _passiveListener.BeginAcceptTcpClient(HandleStore, pathname);
 
-                using (NetworkStream dataStream = _dataClient.GetStream())
-                {
-                    using (FileStream fs = new FileStream(pathname, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan))
-                    {
-                        CopyStream(dataStream, fs);
-                    }
-                }
-                _dataClient.Close();
-                _dataClient = null;
-
-                _writer.WriteLine("226 Closing data connection, file transfer succesful");
-                _writer.Flush();
+                return "150 Opening Passive mode data transfer for STOR";
             }
 
             return "450 Requested file action not taken";
+        }
+
+        private void HandleStore(IAsyncResult res)
+        {
+            string pathname = res.AsyncState as string;
+
+            _dataClient = _passiveListener.EndAcceptTcpClient(res);
+
+            using (NetworkStream dataStream = _dataClient.GetStream())
+            {
+                using (FileStream fs = new FileStream(pathname, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan))
+                {
+                    CopyStream(dataStream, fs);
+                }
+            }
+            _dataClient.Close();
+            _dataClient = null;
+
+            _writer.WriteLine("226 Closing data connection, file transfer succesful");
+            _writer.Flush();
         }
 
         private long CopyStream(Stream input, Stream output)
@@ -458,32 +535,6 @@ namespace ftp_server
             return string.Format("227 Entering Passive Mode ({0},{1},{2},{3},{4},{5})", address[0], address[1], address[2], address[3], portArray[0], portArray[1]);
         }
 
-        private void RunPassive()
-        {
-            while(true)
-            _dataClient = _passiveListener.AcceptTcpClient();
-        }
-
-        private string MPassive()
-        {
-            IPAddress localAddress = ((IPEndPoint)_client.Client.LocalEndPoint).Address;
-
-            _passiveListener = new TcpListener(localAddress, 0);
-            _passiveListener.Start();
-
-            IPEndPoint passiveListenerEndpoint = (IPEndPoint)_passiveListener.LocalEndpoint;
-
-            byte[] address = passiveListenerEndpoint.Address.GetAddressBytes();
-            short port = (short)passiveListenerEndpoint.Port;
-
-            byte[] portArray = BitConverter.GetBytes(port);
-
-            if (BitConverter.IsLittleEndian)
-                Array.Reverse(portArray);
-
-            return string.Format("227 Entering Passive Mode ({0},{1},{2},{3},{4},{5})", address[0], address[1], address[2], address[3], portArray[0], portArray[1]);
-        }
-
         private string CheckUsername(string username)
         {
             _username = username;
@@ -535,11 +586,13 @@ namespace ftp_server
                     if (!IsPathValid(_currentDirectory))
                     {
                         _currentDirectory = _root;
+                        return "550 Can't access directory";
                     }
                 }
                 else
                 {
                     _currentDirectory = _root;
+                    return "550 Directory not found";
                 }
             }
             
