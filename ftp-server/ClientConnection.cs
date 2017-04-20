@@ -152,169 +152,6 @@ namespace ftp_server
                             }
         }
 
-        #region asd
-
-        private string AList(string pathname)
-        {
-            pathname = NormalizeFilename(pathname);
-
-            if (pathname != null)
-            {
-                var state = new DataConnectionOperation { Arguments = pathname, Operation = ListOperation };
-
-                SetupDataConnectionOperation(state);
-
-                return string.Format("150 Opening mode data transfer for LIST");
-            }
-
-            return "450 Requested file action not taken";
-        }
-
-        private void HandleAsyncResult(IAsyncResult result)
-        {
-            _dataClient = _passiveListener.EndAcceptTcpClient(result);
-        }
-
-        private void SetupDataConnectionOperation(DataConnectionOperation state)
-        {
-            _passiveListener.BeginAcceptTcpClient(DoDataConnectionOperation, state);
-        }
-
-        private void HandleStuff()
-        {
-            _passiveListener.BeginAcceptTcpClient(AcceptStuff, _passiveListener);
-        }
-
-        private void AcceptStuff(IAsyncResult res)
-        {
-            HandleStuff();
-            TcpClient cl = _passiveListener.EndAcceptTcpClient(res);
-        }
-
-        private void DoDataConnectionOperation(IAsyncResult result)
-        {
-            HandleStuff();
-
-            HandleAsyncResult(result);
-
-            DataConnectionOperation op = result.AsyncState as DataConnectionOperation;
-
-            string response;
-
-            using (NetworkStream dataStream = _dataClient.GetStream())
-            {
-                response = op.Operation(dataStream, op.Arguments);
-            }
-
-            _dataClient.Close();
-            _dataClient = null;
-
-            _writer.WriteLine(response);
-            _writer.Flush();
-        }
-
-        private string ListOperation(NetworkStream dataStream, string pathname)
-        {
-            StreamWriter dataWriter = new StreamWriter(dataStream, Encoding.ASCII);
-
-            IEnumerable<string> directories = Directory.EnumerateDirectories(pathname);
-
-            foreach (string dir in directories)
-            {
-                DirectoryInfo d = new DirectoryInfo(dir);
-
-                string date = d.LastWriteTime < DateTime.Now - TimeSpan.FromDays(180) ?
-                    d.LastWriteTime.ToString("MMM dd  yyyy") :
-                    d.LastWriteTime.ToString("MMM dd HH:mm");
-
-                string line = string.Format("drwxr-xr-x    2 2003     2003     {0,8} {1}", "4096", d.Name);
-
-                dataWriter.WriteLine(line);
-                dataWriter.Flush();
-            }
-
-            IEnumerable<string> files = Directory.EnumerateFiles(pathname);
-
-            foreach (string file in files)
-            {
-                FileInfo f = new FileInfo(file);
-
-                string date = f.LastWriteTime < DateTime.Now - TimeSpan.FromDays(180) ?
-                    f.LastWriteTime.ToString("MMM dd  yyyy") :
-                    f.LastWriteTime.ToString("MMM dd HH:mm");
-
-                string line = string.Format("-rw-r--r--    2 2003     2003     {0,8} {1}", f.Length, f.Name);
-
-                dataWriter.WriteLine(line);
-                dataWriter.Flush();
-            }
-
-            dataWriter.Close();
-            return "226 Transfer complete";
-        }
-
-        private string ARetrieve(string pathname)
-        {
-            pathname = NormalizeFilename(pathname);
-
-            if (pathname != null)
-            {
-                if (File.Exists(pathname))
-                {
-                    var state = new DataConnectionOperation { Arguments = pathname, Operation = RetrieveOperation };
-
-                    SetupDataConnectionOperation(state);
-
-                    return string.Format("150 Opening mode data transfer for RETR");
-                }
-            }
-
-            return "550 File Not Found";
-        }
-
-        private string AStore(string pathname)
-        {
-            pathname = NormalizeFilename(pathname);
-
-            if (pathname != null)
-            {
-                var state = new DataConnectionOperation { Arguments = pathname, Operation = StoreOperation };
-
-                SetupDataConnectionOperation(state);
-
-                return string.Format("150 Opening mode data transfer for STOR");
-            }
-
-            return "450 Requested file action not taken";
-        }
-
-        private string RetrieveOperation(NetworkStream dataStream, string pathname)
-        {
-            long bytes = 0;
-
-            using (FileStream fs = new FileStream(pathname, FileMode.Open, FileAccess.Read))
-            {
-                bytes = CopyStream(fs, dataStream);
-            }
-
-            return "226 Closing data connection, file transfer successful";
-        }
-
-        private string StoreOperation(NetworkStream dataStream, string pathname)
-        {
-            long bytes = 0;
-
-            using (FileStream fs = new FileStream(pathname, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan))
-            {
-                bytes = CopyStream(dataStream, fs);
-            }
-
-            return "226 Closing data connection, file transfer successful";
-        }
-
-        #endregion
-
-
         private string NormalizeFilename(string path)
         {
             if (path == null)
@@ -332,7 +169,14 @@ namespace ftp_server
             }
             else
             {
-                path = new FileInfo(Path.Combine(_currentDirectory, path)).FullName;
+                try
+                {
+                    path = new FileInfo(Path.Combine(_currentDirectory, path)).FullName;
+                }
+                catch(FileNotFoundException ex)
+                {
+                }
+                
             }
 
             return IsPathValid(path) ? path : null;
@@ -345,6 +189,10 @@ namespace ftp_server
 
         private string List(string pathname)
         {
+            if (pathname != null && pathname.StartsWith("-"))
+            {
+                pathname = "";
+            }
             pathname = NormalizeFilename(pathname);
 
             if(pathname != null)
@@ -430,9 +278,9 @@ namespace ftp_server
                     _dataClient.Close();
                     _dataClient = null;
 
-                    _writer.WriteLine("226 Closing data connection, file transfer succesful");
-                    _writer.Flush();
-                    
+                   // _writer.WriteLine("226 Closing data connection, file transfer succesful");
+                   // _writer.Flush();
+                    return "226 Closing data connection, file transfer succesful";
                 }
             }
 
@@ -523,12 +371,11 @@ namespace ftp_server
                     response = "200 OK";
                     break;
                 case "A":
+                    _transferType = typeCode;
                     response = "200 OK";
                     break;
                 case "E":
-                    break;
                 case "L":
-                    break;
                 default:
                     response = "504 Command not implemented for that parameter.";
                     break;
@@ -542,9 +389,7 @@ namespace ftp_server
                         response = "200 Ok";
                         break;
                     case "T":
-                        break;
                     case "C":
-                        break;
                     default:
                         response = "504 Command not implemented for that parameter.";
                         break;
@@ -625,8 +470,6 @@ namespace ftp_server
 
             _passiveListener = new TcpListener(localAddress, 0);
             _passiveListener.Start();
-
-            
 
             IPEndPoint passiveListenerEndpoint = (IPEndPoint)_passiveListener.LocalEndpoint;
 
