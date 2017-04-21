@@ -10,11 +10,12 @@ using System.Threading.Tasks;
 
 namespace ftp_server
 {
-    class FtpServer
+    class FtpServer// : IDisposable
     {
         private Thread thread = null;
         private TcpListener socketListen = null;
         private int port;
+        private bool _disposed;
 
         public FtpServer()
         {
@@ -24,9 +25,9 @@ namespace ftp_server
         public void Start(int _port)
         {
             port = _port;
-            //   thread = new Thread(ThreadRun);
-            // thread.Start();
-            ThreadRun();
+            thread = new Thread(ThreadRun);
+            thread.Start();
+           // ThreadRun();
         }
 
         public void Stop()
@@ -68,6 +69,7 @@ namespace ftp_server
                             ClientConnection clientConnection = new ClientConnection(socket);
 
                             //clientConnection.HandleClient();
+                            
 
                             clientConnection.Start();
                           
@@ -76,5 +78,28 @@ namespace ftp_server
                 }
             }
         }
+        /*
+        public void Dispose()
+        {
+            Dispose(true);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    Stop();
+
+                    foreach (ClientConnection conn in _activeConnections)
+                    {
+                        conn.Dispose();
+                    }
+                }
+            }
+
+            _disposed = true;
+        }*/
     }
 }

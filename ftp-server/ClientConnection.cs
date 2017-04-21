@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace ftp_server
 {
-    class ClientConnection
+    class ClientConnection : IDisposable
     {
         private TcpClient _client;
         private TcpClient _dataClient;
@@ -22,6 +22,8 @@ namespace ftp_server
 
         private StreamReader _dataReader;
         private StreamWriter _dataWriter;
+
+        private bool _disposed;
 
 
 
@@ -142,14 +144,25 @@ namespace ftp_server
                 }
                 else
                 {
-                    _writer.WriteLine(response);
-                    _writer.Flush();
+                    try
+                    {
+                        _writer.WriteLine(response);
+                        _writer.Flush();
+                    }
+                    catch(IOException)
+                    {
+                        Console.WriteLine("Connection lost.");
+                        break;
+                    }
+                    
 
                     if (response.StartsWith("221"))
                     {
                         break;
                     }
                 }
+                Dispose();
+
             }
         }
 
@@ -174,10 +187,10 @@ namespace ftp_server
                 {
                     path = new FileInfo(Path.Combine(_currentDirectory, path)).FullName;
                 }
-                catch(FileNotFoundException ex)
+                catch(ArgumentNullException)
                 {
+
                 }
-                
             }
 
             return IsPathValid(path) ? path : null;
@@ -200,9 +213,11 @@ namespace ftp_server
             {
                 _passiveListener.BeginAcceptTcpClient(HandleList, pathname);
 
+                Thread.Sleep(100);
+
                 return "150 Opening Passive mode data transfer for LIST";
             }
-
+            Console.WriteLine("450 Requested file action not taken");
             return "450 Requested file action not taken";
         }
 
@@ -277,7 +292,6 @@ namespace ftp_server
 
             using (NetworkStream stream = _dataClient.GetStream())
             {
-                _dataReader = new StreamReader(stream, Encoding.ASCII);
                 _dataWriter = new StreamWriter(stream, Encoding.ASCII);
 
                 IEnumerable<string> directories = Directory.EnumerateDirectories(pathname);
@@ -291,8 +305,8 @@ namespace ftp_server
                     d.LastWriteTime.ToString("MMM dd HH:mm");
                     
                     string line = string.Format("drwxr-xr-x 2 2003 2003 {0,8} {1}", "4096",  d.Name);
+
                     _dataWriter.WriteLine(line);
-                    _dataWriter.Flush();
                 }
 
 
@@ -309,10 +323,10 @@ namespace ftp_server
                     string line = string.Format("-rw-r--r--    2 2003     2003     {0,8} {1}", f.Length, f.Name);
 
                     _dataWriter.WriteLine(line);
-                    _dataWriter.Flush();
                 }
+                _dataWriter.Flush();
             }
-
+            
             _dataClient.Close();
             _dataClient = null;
 
@@ -597,6 +611,47 @@ namespace ftp_server
             }
             
             return "250 Changed to new directory";
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    if (_client != null)
+                    {
+                        _client.Close();
+                    }
+
+                    if (_dataClient != null)
+                    {
+                        _dataClient.Close();
+                    }
+
+                    if (_networkStream != null)
+                    {
+                        _networkStream.Close();
+                    }
+
+                    if (_reader != null)
+                    {
+                        _reader.Close();
+                    }
+
+                    if (_writer != null)
+                    {
+                        _writer.Close();
+                    }
+                }
+            }
+
+            _disposed = true;
         }
     }
 }
