@@ -13,93 +13,70 @@ namespace ftp_server
     class FtpServer// : IDisposable
     {
         private Thread thread = null;
-        private TcpListener socketListen = null;
-        private int port;
+        private TcpListener _listener = null;
+        private int _port;
         private bool _disposed;
+        private bool _listening;
+        private List<ClientConnection> _activeConnections;
 
-        public FtpServer()
+        public FtpServer(int port)
         {
-
+            _port = port;
         }
 
-        public void Start(int _port)
+
+        public void Start()
         {
-            port = _port;
-            thread = new Thread(ThreadRun);
-            thread.Start();
-           // ThreadRun();
+            _listener = new TcpListener(IPAddress.Any, _port);
+
+
+            _listening = true;
+            _listener.Start();
+
+            _activeConnections = new List<ClientConnection>();
+
+            _listener.BeginAcceptTcpClient(HandleAcceptTcpClient, _listener);
         }
 
         public void Stop()
         {
-            socketListen.Stop();
-            thread.Join();
+
+            _listening = false;
+            _listener.Stop();
+
+            _listener = null;
         }
 
-        private void ThreadRun()
+        private void HandleAcceptTcpClient(IAsyncResult result)
         {
-            socketListen = new TcpListener(IPAddress.Any, port);
-            
-            if(socketListen != null)
+            if (_listening)
             {
-                socketListen.Start();
+                _listener.BeginAcceptTcpClient(HandleAcceptTcpClient, _listener);
 
-                bool run = true;
+                TcpClient client = _listener.EndAcceptTcpClient(result);
 
-                while(run)
-                {
-                    TcpClient socket = null;
-                    try
-                    {
-                        socket = socketListen.AcceptTcpClient();
-                    }
-                    catch(SocketException)
-                    {
-                        run = false;
-                    }
-                    finally
-                    {
-                        if(socket == null)
-                        {
-                            run = false;
-                        }
-                        else
-                        {
+                ClientConnection clientConnection = new ClientConnection(client);
 
-                            ClientConnection clientConnection = new ClientConnection(socket);
+                _activeConnections.Add(clientConnection);
 
-                            //clientConnection.HandleClient();
-                            
-
-                            clientConnection.Start();
-                          
-                        }
-                    }
-                }
+                clientConnection.HandleClient();
             }
         }
-        /*
-        public void Dispose()
-        {
-            Dispose(true);
-        }
+        
 
-        protected virtual void Dispose(bool disposing)
+        public void Dispose()
         {
             if (!_disposed)
             {
-                if (disposing)
-                {
-                    Stop();
+                Stop();
 
-                    foreach (ClientConnection conn in _activeConnections)
-                    {
-                        conn.Dispose();
-                    }
+                foreach (ClientConnection conn in _activeConnections)
+                {
+                    conn.Dispose();
                 }
             }
 
             _disposed = true;
-        }*/
+        }
     }
 }

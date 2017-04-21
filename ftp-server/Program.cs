@@ -10,9 +10,11 @@ namespace ftp_server
     {
         static void Main(string[] args)
         {
-            FtpServer ftpServer = new FtpServer();
+            FtpServer ftpServer = new FtpServer(21);
 
-            ftpServer.Start(21);
+            ftpServer.Start();
+            Console.WriteLine("Press any key to stop...");
+            Console.ReadKey(true);
 
         }
     }

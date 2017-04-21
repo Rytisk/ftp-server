@@ -19,19 +19,10 @@ namespace ftp_server
         private NetworkStream _networkStream;
         private StreamReader _reader;
         private StreamWriter _writer;
-
-        private StreamReader _dataReader;
+        
         private StreamWriter _dataWriter;
 
         private bool _disposed;
-
-
-
-        private class DataConnectionOperation
-        {
-            public Func<NetworkStream, string, string> Operation { get; set; }
-            public string Arguments { get; set; }
-        }
 
         private IPEndPoint _dataEndpoint;
 
@@ -40,8 +31,6 @@ namespace ftp_server
         private string _transferType;
         private string _currentDirectory;
         private string _root;
-
-        private Thread th;
 
         public ClientConnection(TcpClient client)
         {
@@ -52,24 +41,15 @@ namespace ftp_server
             _writer = new StreamWriter(_networkStream);
         }
 
-        public void Start()
-        {
-            th = new Thread(HandleClient);
-
-            th.Start();
-        }
-
         public void HandleClient()
         {
-            _writer.WriteLine("220 Ready!");
+            _writer.WriteLine("220 Ready");
             _writer.Flush();
 
             string line = null;
 
             _dataClient = new TcpClient();
-
-            Console.WriteLine("starting the server");
-
+            
             while (!string.IsNullOrEmpty(line = _reader.ReadLine()))
             {
                 Console.WriteLine(line);
@@ -155,15 +135,13 @@ namespace ftp_server
                         break;
                     }
                     
-
                     if (response.StartsWith("221"))
                     {
                         break;
                     }
                 }
-                Dispose();
-
             }
+            Dispose();
         }
 
         private string NormalizeFilename(string path)
@@ -211,13 +189,12 @@ namespace ftp_server
 
             if(pathname != null)
             {
-                _passiveListener.BeginAcceptTcpClient(HandleList, pathname);
+                _writer.WriteLine("150 Opening Passive mode data transfer for LIST");
+                _writer.Flush();
 
-                Thread.Sleep(100);
-
-                return "150 Opening Passive mode data transfer for LIST";
+                return HandleList(pathname);
             }
-            Console.WriteLine("450 Requested file action not taken");
+
             return "450 Requested file action not taken";
         }
 
@@ -284,11 +261,9 @@ namespace ftp_server
             return "550 Directory not created";
         }
 
-        private void HandleList(IAsyncResult res)
+        private string HandleList(string pathname)
         {
-            string pathname = res.AsyncState as string;
-
-            _dataClient = _passiveListener.EndAcceptTcpClient(res);
+            _dataClient = _passiveListener.AcceptTcpClient();
 
             using (NetworkStream stream = _dataClient.GetStream())
             {
@@ -330,8 +305,7 @@ namespace ftp_server
             _dataClient.Close();
             _dataClient = null;
 
-            _writer.WriteLine("226 Transfer complete");
-            _writer.Flush();
+            return "226 Transfer complete";
         }
 
         private void HandleRetrieve(IAsyncResult res)
@@ -615,39 +589,31 @@ namespace ftp_server
 
         public void Dispose()
         {
-            Dispose(true);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
             if (!_disposed)
             {
-                if (disposing)
+                if (_client != null)
                 {
-                    if (_client != null)
-                    {
-                        _client.Close();
-                    }
+                    _client.Close();
+                }
 
-                    if (_dataClient != null)
-                    {
-                        _dataClient.Close();
-                    }
+                if (_dataClient != null)
+                {
+                    _dataClient.Close();
+                }
 
-                    if (_networkStream != null)
-                    {
-                        _networkStream.Close();
-                    }
+                if (_networkStream != null)
+                {
+                    _networkStream.Close();
+                }
 
-                    if (_reader != null)
-                    {
-                        _reader.Close();
-                    }
+                if (_reader != null)
+                {
+                    _reader.Close();
+                }
 
-                    if (_writer != null)
-                    {
-                        _writer.Close();
-                    }
+                if (_writer != null)
+                {
+                    _writer.Close();
                 }
             }
 
