@@ -144,40 +144,165 @@ namespace ftp_server
             Dispose();
         }
 
-        private string NormalizeFilename(string path)
-        {
-            if (path == null)
-            {
-                path = string.Empty;
-            }
+        #region AccessControlCommands
 
-            if (path == "/")
+        private string CheckUsername(string username)
+        {
+            _username = username;
+
+            return "331 Username ok, need password";
+        }
+
+        private string CheckPassword(string password)
+        {
+            _password = password;
+
+            if (true)
             {
-                return _root;
-            }
-            else if (path.StartsWith("/"))
-            {
-                path = new FileInfo(Path.Combine(_root, path.Substring(1))).FullName;
+                _root = "E:\\";
+                _currentDirectory = _root;
+                return "230 User logged in";
             }
             else
             {
-                try
-                {
-                    path = new FileInfo(Path.Combine(_currentDirectory, path)).FullName;
-                }
-                catch(ArgumentNullException)
-                {
+                return "530 Not logged in";
+            }
+        }
 
+        private string ChangeWorkingDirectory(string pathname)
+        {
+            if (pathname == "/")
+            {
+                _currentDirectory = _root;
+            }
+            else
+            {
+                string newDir;
+
+                if (pathname.StartsWith("/"))
+                {
+                    pathname = pathname.Substring(1).Replace('/', '\\');
+                    newDir = Path.Combine(_root, pathname);
+                }
+                else
+                {
+                    pathname = pathname.Replace('/', '\\');
+                    newDir = Path.Combine(_currentDirectory, pathname);
+                }
+
+                if (Directory.Exists(newDir))
+                {
+                    _currentDirectory = new DirectoryInfo(newDir).FullName;
+
+                    if (!IsPathValid(_currentDirectory))
+                    {
+                        _currentDirectory = _root;
+                        return "550 Can't access directory";
+                    }
+                }
+                else
+                {
+                    _currentDirectory = _root;
+                    return "550 Directory not found";
                 }
             }
 
-            return IsPathValid(path) ? path : null;
+            return "250 Changed to new directory";
         }
 
-        private bool IsPathValid(string path)
+        #endregion
+
+        #region TransferParameterCommands
+
+        private string Type(string typeCode, string formatControl)
         {
-            return path.StartsWith(_root);
+            string response = "500 error";
+
+            switch (typeCode)
+            {
+                case "I":
+                    _transferType = typeCode;
+                    response = "200 OK";
+                    break;
+                case "A":
+                    _transferType = typeCode;
+                    response = "200 OK";
+                    break;
+                case "E":
+                case "L":
+                default:
+                    response = "504 Command not implemented for that parameter.";
+                    break;
+            }
+
+            if (formatControl != null)
+            {
+                switch (formatControl)
+                {
+                    case "N":
+                        response = "200 Ok";
+                        break;
+                    case "T":
+                    case "C":
+                    default:
+                        response = "504 Command not implemented for that parameter.";
+                        break;
+                }
+            }
+
+            return response;
         }
+
+        private string Port(string hostPort)
+        {
+            string[] ipAndPort = hostPort.Split(',');
+
+            byte[] ipAddress = new byte[4];
+            byte[] port = new byte[2];
+
+            for (int i = 0; i < 4; i++)
+            {
+                ipAddress[i] = Convert.ToByte(ipAndPort[i]);
+            }
+
+            for (int i = 4; i < 6; i++)
+            {
+                port[i - 4] = Convert.ToByte(ipAndPort[i]);
+            }
+
+            if (BitConverter.IsLittleEndian)
+                Array.Reverse(port);
+
+            BitConverter.ToInt16(port, 0);
+
+            _dataEndpoint = new IPEndPoint(new IPAddress(ipAddress), BitConverter.ToInt16(port, 0));
+
+            return "200 Data Connection Established";
+        }
+
+        private string Passive()
+        {
+            IPAddress localAddress = ((IPEndPoint)_client.Client.LocalEndPoint).Address;
+
+            _passiveListener = new TcpListener(localAddress, 0);
+            _passiveListener.Start();
+
+            IPEndPoint passiveListenerEndpoint = (IPEndPoint)_passiveListener.LocalEndpoint;
+
+            byte[] address = passiveListenerEndpoint.Address.GetAddressBytes();
+            short port = (short)passiveListenerEndpoint.Port;
+
+            byte[] portArray = BitConverter.GetBytes(port);
+
+            if (BitConverter.IsLittleEndian)
+                Array.Reverse(portArray);
+
+            return string.Format("227 Entering Passive Mode ({0},{1},{2},{3},{4},{5})", address[0], address[1], address[2], address[3], portArray[0], portArray[1]);
+        }
+
+        #endregion
+
+        #region FTPServiceCommands
 
         private string List(string pathname)
         {
@@ -377,6 +502,22 @@ namespace ftp_server
             _writer.Flush();
         }
 
+        private string PrintWorkingDirectory()
+        {
+            string current = _currentDirectory.Replace(_root, string.Empty).Replace('\\', '/');
+
+            if (current.Length == 0)
+            {
+                current = "/";
+            }
+
+            return string.Format("257 \"{0}\" is current directory.", current); ;
+        }
+
+        #endregion
+
+        #region SupportFunctions
+
         private long CopyStream(Stream input, Stream output)
         {
             if (_transferType == "I")
@@ -425,167 +566,42 @@ namespace ftp_server
             return total;
         }
 
-        private string Type(string typeCode, string formatControl)
+        private string NormalizeFilename(string path)
         {
-            string response = "500 error";
-
-            switch (typeCode)
+            if (path == null)
             {
-                case "I":
-                    _transferType = typeCode;
-                    response = "200 OK";
-                    break;
-                case "A":
-                    _transferType = typeCode;
-                    response = "200 OK";
-                    break;
-                case "E":
-                case "L":
-                default:
-                    response = "504 Command not implemented for that parameter.";
-                    break;
+                path = string.Empty;
             }
 
-            if (formatControl != null)
+            if (path == "/")
             {
-                switch (formatControl)
+                return _root;
+            }
+            else if (path.StartsWith("/"))
+            {
+                path = new FileInfo(Path.Combine(_root, path.Substring(1))).FullName;
+            }
+            else
+            {
+                try
                 {
-                    case "N":
-                        response = "200 Ok";
-                        break;
-                    case "T":
-                    case "C":
-                    default:
-                        response = "504 Command not implemented for that parameter.";
-                        break;
+                    path = new FileInfo(Path.Combine(_currentDirectory, path)).FullName;
+                }
+                catch (ArgumentNullException)
+                {
+
                 }
             }
 
-            return response;
+            return IsPathValid(path) ? path : null;
+        }
+
+        private bool IsPathValid(string path)
+        {
+            return path.StartsWith(_root);
         }
         
-        private string Port(string hostPort)
-        {
-            string[] ipAndPort = hostPort.Split(',');
-
-            byte[] ipAddress = new byte[4];
-            byte[] port = new byte[2];
-
-            for (int i = 0; i < 4; i++)
-            {
-                ipAddress[i] = Convert.ToByte(ipAndPort[i]);
-            }
-
-            for (int i = 4; i < 6; i++)
-            {
-                port[i - 4] = Convert.ToByte(ipAndPort[i]);
-            }
-
-            if (BitConverter.IsLittleEndian)
-                Array.Reverse(port);
-
-            BitConverter.ToInt16(port, 0);
-
-            _dataEndpoint = new IPEndPoint(new IPAddress(ipAddress), BitConverter.ToInt16(port, 0));
-
-            return "200 Data Connection Established";
-        }
-
-        private string PrintWorkingDirectory()
-        {
-            string current = _currentDirectory.Replace(_root, string.Empty).Replace('\\', '/');
-
-            if (current.Length == 0)
-            {
-                current = "/";
-            }
-
-            return string.Format("257 \"{0}\" is current directory.", current); ;
-        }
-
-        private string Passive()
-        {
-            IPAddress localAddress = ((IPEndPoint)_client.Client.LocalEndPoint).Address;
-
-            _passiveListener = new TcpListener(localAddress, 0);
-            _passiveListener.Start();
-
-            IPEndPoint passiveListenerEndpoint = (IPEndPoint)_passiveListener.LocalEndpoint;
-
-            byte[] address = passiveListenerEndpoint.Address.GetAddressBytes();
-            short port = (short)passiveListenerEndpoint.Port;
-
-            byte[] portArray = BitConverter.GetBytes(port);
-
-            if (BitConverter.IsLittleEndian)
-                Array.Reverse(portArray);
-
-            return string.Format("227 Entering Passive Mode ({0},{1},{2},{3},{4},{5})", address[0], address[1], address[2], address[3], portArray[0], portArray[1]);
-        }
-
-        private string CheckUsername(string username)
-        {
-            _username = username;
-
-            return "331 Username ok, need password";
-        }
-
-        private string CheckPassword(string password)
-        {
-            _password = password;
-
-            if (true)
-            {
-                _root = "E:\\";
-                _currentDirectory = _root;
-                return "230 User logged in";
-            }
-            else
-            {
-                return "530 Not logged in";
-            }
-        }
-
-        private string ChangeWorkingDirectory(string pathname)
-        {
-            if (pathname == "/")
-            {
-                _currentDirectory = _root;
-            }
-            else
-            {
-                string newDir;
-
-                if (pathname.StartsWith("/"))
-                {
-                    pathname = pathname.Substring(1).Replace('/', '\\');
-                    newDir = Path.Combine(_root, pathname);
-                }
-                else
-                {
-                    pathname = pathname.Replace('/', '\\');
-                    newDir = Path.Combine(_currentDirectory, pathname);
-                }
-
-                if (Directory.Exists(newDir))
-                {
-                    _currentDirectory = new DirectoryInfo(newDir).FullName;
-
-                    if (!IsPathValid(_currentDirectory))
-                    {
-                        _currentDirectory = _root;
-                        return "550 Can't access directory";
-                    }
-                }
-                else
-                {
-                    _currentDirectory = _root;
-                    return "550 Directory not found";
-                }
-            }
-            
-            return "250 Changed to new directory";
-        }
+        #endregion
 
         public void Dispose()
         {
