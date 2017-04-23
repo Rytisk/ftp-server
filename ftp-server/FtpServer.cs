@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace ftp_server
 {
-    class FtpServer// : IDisposable
+    class FtpServer : IDisposable
     {
         private Thread thread = null;
         private TcpListener _listener = null;

@@ -31,6 +31,7 @@ namespace ftp_server
         private string _transferType;
         private string _currentDirectory;
         private string _root;
+        private string _structureType;
 
         public ClientConnection(TcpClient client)
         {
@@ -112,6 +113,12 @@ namespace ftp_server
                     case "RMD":
                         response = RemoveDirectoyy(argument);
                         break;
+                    case "STRU":
+                        response = Structure(argument);
+                        break;
+                    case "MODE":
+                        response = Mode(argument);
+                        break;
                     default:
                         response = "502 Command not implemented";
                         break;
@@ -178,17 +185,24 @@ namespace ftp_server
             else
             {
                 string newDir;
-
-                if (pathname.StartsWith("/"))
+                try
                 {
-                    pathname = pathname.Substring(1).Replace('/', '\\');
-                    newDir = Path.Combine(_root, pathname);
+                    if (pathname.StartsWith("/"))
+                    {
+                        pathname = pathname.Substring(1).Replace('/', '\\');
+                        newDir = Path.Combine(_root, pathname);
+                    }
+                    else
+                    {
+                        pathname = pathname.Replace('/', '\\');
+                        newDir = Path.Combine(_currentDirectory, pathname);
+                    }
                 }
-                else
+                catch(ArgumentException)
                 {
-                    pathname = pathname.Replace('/', '\\');
-                    newDir = Path.Combine(_currentDirectory, pathname);
+                    return "550 Directory not found";
                 }
+                
 
                 if (Directory.Exists(newDir))
                 {
@@ -240,7 +254,7 @@ namespace ftp_server
                 switch (formatControl)
                 {
                     case "N":
-                        response = "200 Ok";
+                        response = "200 OK";
                         break;
                     case "T":
                     case "C":
@@ -298,6 +312,35 @@ namespace ftp_server
                 Array.Reverse(portArray);
 
             return string.Format("227 Entering Passive Mode ({0},{1},{2},{3},{4},{5})", address[0], address[1], address[2], address[3], portArray[0], portArray[1]);
+        }
+
+        private string Structure(string structure)
+        {
+            switch (structure)
+            {
+                case "F":
+                    _structureType = "F";
+                    break;
+                case "R":
+                case "P":
+                    return string.Format("504 STRU not implemented for \"{0}\"", structure);
+                default:
+                    return string.Format("501 Parameter {0} not recognized", structure);
+            }
+
+            return "200 Command OK";
+        }
+
+        private string Mode(string mode)
+        {
+            if (mode.ToUpperInvariant() == "S")
+            {
+                return "200 OK";
+            }
+            else
+            {
+                return "504 Command not implemented for that parameter";
+            }
         }
 
         #endregion
@@ -399,10 +442,6 @@ namespace ftp_server
                 foreach (string dir in directories)
                 {
                     DirectoryInfo d = new DirectoryInfo(dir);
-
-                    string date = d.LastWriteTime < DateTime.Now - TimeSpan.FromDays(180) ?
-                    d.LastWriteTime.ToString("MMM dd yyyy") :
-                    d.LastWriteTime.ToString("MMM dd HH:mm");
                     
                     string line = string.Format("drwxr-xr-x 2 2003 2003 {0,8} {1}", "4096",  d.Name);
 
@@ -415,10 +454,6 @@ namespace ftp_server
                 foreach (string file in files)
                 {
                     FileInfo f = new FileInfo(file);
-
-                    string date = f.LastWriteTime < DateTime.Now - TimeSpan.FromDays(180) ?
-                        f.LastWriteTime.ToString("MMM dd  yyyy") :
-                        f.LastWriteTime.ToString("MMM dd HH:mm");
                     
                     string line = string.Format("-rw-r--r--    2 2003     2003     {0,8} {1}", f.Length, f.Name);
 
