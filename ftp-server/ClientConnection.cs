@@ -12,24 +12,25 @@ namespace ftp_server
 {
     class ClientConnection : IDisposable
     {
+        #region Fields
+
         private TcpClient _client;
         private TcpClient _dataClient;
         private TcpListener _passiveListener;
 
         private NetworkStream _networkStream;
         private StreamReader _reader;
-        private StreamWriter _writer;
-        
+        private StreamWriter _writer;     
         private StreamWriter _dataWriter;
-
-        private bool _disposed;
 
         private IPEndPoint _dataEndpoint;
 
         private User _user;
         private string _transferType;
         private string _currentDirectory;
-        private string _structureType;
+        private bool _disposed;
+
+        #endregion
 
         public ClientConnection(TcpClient client)
         {
@@ -126,8 +127,16 @@ namespace ftp_server
 
         public void HandleClient()
         {
-            _writer.WriteLine("220 Ready");
-            _writer.Flush();
+            try
+            {
+                _writer.WriteLine("220 Ready");
+                _writer.Flush();
+            }
+            catch(IOException ex)
+            {
+                Console.WriteLine(ex.Message);
+                return;
+            }
 
             string line = null;
 
@@ -155,8 +164,6 @@ namespace ftp_server
                 {
                     response = LoginResponse(cmd, argument);
                 }
-                
-
 
                 if (_client == null || !_client.Connected)
                 {
@@ -188,9 +195,13 @@ namespace ftp_server
 
         private string CheckUsername(string username)
         {
-            _user.Username = username;
+            if(Login.UsernameExists(username))
+            {
+                _user.Username = username;
+                return "331 Username ok, need password";
+            }
 
-            return "331 Username ok, need password";
+            return "530 Not logged in";            
         }
 
         private string CheckPassword(string password)
@@ -353,7 +364,6 @@ namespace ftp_server
             switch (structure)
             {
                 case "F":
-                    _structureType = "F";
                     break;
                 case "R":
                 case "P":
@@ -386,11 +396,19 @@ namespace ftp_server
             pathname = NormalizeFilename(pathname);
 
             if(pathname != null)
-            {
-                _writer.WriteLine("150 Opening Passive mode data transfer for LIST");
-                _writer.Flush();
+            {   
+                try
+                { 
+                    _writer.WriteLine("150 Opening Passive mode data transfer for LIST");
+                    _writer.Flush();
 
-                return HandleList(pathname);
+                    return HandleList(pathname);
+                }
+                catch (IOException ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
+
             }
 
             return "450 Requested file action not taken";
@@ -475,7 +493,17 @@ namespace ftp_server
                     
                     string line = string.Format("drwxr-xr-x 2 2003 2003 {0,8} {1}", "4096",  d.Name);
 
-                    _dataWriter.WriteLine(line);
+                    try
+                    {
+                        _dataWriter.WriteLine(line);
+                        _dataWriter.Flush();
+                    }
+                    catch(IOException ex)
+                    {
+                        Console.WriteLine(ex.Message);
+                        return "550 Requested action not taken";
+                    }
+
                 }
 
 
@@ -487,9 +515,18 @@ namespace ftp_server
                     
                     string line = string.Format("-rw-r--r--    2 2003     2003     {0,8} {1}", f.Length, f.Name);
 
-                    _dataWriter.WriteLine(line);
+                    try
+                    {
+                        _dataWriter.WriteLine(line);
+                        _dataWriter.Flush();
+                    }
+                    catch (IOException ex)
+                    {
+                        Console.WriteLine(ex.Message);
+                        return "550 Requested action not taken";
+                    }
                 }
-                _dataWriter.Flush();
+                
             }
             
             _dataClient.Close();
@@ -510,8 +547,15 @@ namespace ftp_server
                 {
                     if(CopyStream(fs, dataStream) > 0)
                     {
-                        _writer.WriteLine("226 Closing data connection, file transfer succesful");
-                        _writer.Flush();
+                        try
+                        {
+                            _writer.WriteLine("226 Closing data connection, file transfer succesful");
+                            _writer.Flush();
+                        }
+                        catch(IOException ex)
+                        {
+                            Console.WriteLine(ex.Message);
+                        }
                     }
                 }
             }
@@ -558,14 +602,22 @@ namespace ftp_server
             {
                 using (FileStream fs = new FileStream(pathname, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan))
                 {
-                    CopyStream(dataStream, fs);
+                    if(CopyStream(dataStream, fs) > 0)
+                    {
+                        try
+                        {
+                            _writer.WriteLine("226 Closing data connection, file transfer succesful");
+                            _writer.Flush();
+                        }
+                        catch(IOException ex)
+                        {
+                            Console.WriteLine(ex.Message);
+                        }
+                    }
                 }
             }
             _dataClient.Close();
             _dataClient = null;
-
-            _writer.WriteLine("226 Closing data connection, file transfer succesful");
-            _writer.Flush();
         }
 
         private string PrintWorkingDirectory()
@@ -588,7 +640,7 @@ namespace ftp_server
         {
             if (_transferType == "I")
             {
-                return CopyStream(input, output, 4096);
+                return CopyStreamImage(input, output, 4096);
             }
             else
             {
@@ -596,7 +648,7 @@ namespace ftp_server
             }
         }
 
-        private static long CopyStream(Stream input, Stream output, int bufferSize)
+        private long CopyStreamImage(Stream input, Stream output, int bufferSize)
         {
             byte[] buffer = new byte[bufferSize];
             int count = 0;
@@ -619,7 +671,7 @@ namespace ftp_server
             return total;
         }
 
-        private static long CopyStreamAscii(Stream input, Stream output, int bufferSize)
+        private long CopyStreamAscii(Stream input, Stream output, int bufferSize)
         {
             char[] buffer = new char[bufferSize];
             int count = 0;
@@ -631,8 +683,16 @@ namespace ftp_server
                 {
                     while ((count = rdr.Read(buffer, 0, buffer.Length)) > 0)
                     {
-                        wtr.Write(buffer, 0, count);
-                        total += count;
+                        try
+                        { 
+                            wtr.Write(buffer, 0, count);
+                            total += count;
+                        }
+                        catch (IOException ioe)
+                        {
+                            Console.WriteLine(ioe.Message);
+                            return -1;
+                        }
                     }
                 }
             }

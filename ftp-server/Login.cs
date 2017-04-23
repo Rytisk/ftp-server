@@ -19,5 +19,13 @@ namespace ftp_server
               .Where(id => id.Attribute("username").Value == user.Username
                      && id.Attribute("password").Value == user.Password).Any();
         }
+
+        public static bool UsernameExists(string username)
+        {
+            XDocument xdoc = XDocument.Load(_filePath);
+
+            return xdoc.Descendants("user")
+              .Where(id => id.Attribute("username").Value == username).Any();
+        }
     }
 }
