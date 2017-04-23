@@ -12,7 +12,6 @@ namespace ftp_server
 {
     class FtpServer : IDisposable
     {
-        private Thread thread = null;
         private TcpListener _listener = null;
         private int _port;
         private bool _disposed;

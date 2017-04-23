@@ -26,20 +26,102 @@ namespace ftp_server
 
         private IPEndPoint _dataEndpoint;
 
-        private string _username;
-        private string _password;
+        private User _user;
         private string _transferType;
         private string _currentDirectory;
-        private string _root;
         private string _structureType;
 
         public ClientConnection(TcpClient client)
         {
+            _user = new User();
+
             _client = client;
 
             _networkStream = _client.GetStream();
             _reader = new StreamReader(_networkStream);
             _writer = new StreamWriter(_networkStream);
+        }
+
+        private string Response(string cmd, string argument)
+        {
+            string response = "";
+            switch (cmd)
+            {
+                case "USER":
+                    response = "503 Bad sequence of commands";
+                    break;
+                case "PASS":
+                    response = "503 Bad sequence of commands";
+                    break;
+                case "CWD":
+                    response = ChangeWorkingDirectory(argument);
+                    break;
+                case "CDUP":
+                    response = ChangeWorkingDirectory("..");
+                    break;
+                case "QUIT":
+                    response = "221 Service closing control connection";
+                    break;
+                case "PWD":
+                    response = PrintWorkingDirectory();
+                    break;
+                case "TYPE":
+                    string[] args = argument.Split(' ');
+                    response = Type(args[0], args.Length > 1 ? args[1] : null);
+                    break;
+                case "PORT":
+                    response = Port(argument);
+                    break;
+                case "PASV":
+                    response = Passive();
+                    break;
+                case "LIST":
+                    response = List(argument);
+                    break;
+                case "RETR":
+                    response = Retrieve(argument);
+                    break;
+                case "STOR":
+                    response = Store(argument);
+                    break;
+                case "DELE":
+                    response = Delete(argument);
+                    break;
+                case "MKD":
+                    response = MakeDirectory(argument);
+                    break;
+                case "RMD":
+                    response = RemoveDirectoyy(argument);
+                    break;
+                case "STRU":
+                    response = Structure(argument);
+                    break;
+                case "MODE":
+                    response = Mode(argument);
+                    break;
+                default:
+                    response = "502 Command not implemented";
+                    break;
+            }
+            return response;
+        }
+
+        private string LoginResponse(string cmd, string argument)
+        {
+            string response = "";
+            switch (cmd)
+            {
+                case "USER":
+                    response = CheckUsername(argument);
+                    break;
+                case "PASS":
+                    response = CheckPassword(argument);
+                    break;
+                default:
+                    response = "530 Not logged in";
+                    break;
+            }
+            return response;
         }
 
         public void HandleClient()
@@ -65,64 +147,15 @@ namespace ftp_server
                 if (string.IsNullOrWhiteSpace(argument))
                     argument = null;
 
-                switch (cmd)
+                if(_user.LoggedIn)
                 {
-                    case "USER":
-                        response = CheckUsername(argument);
-                        break;
-                    case "PASS":
-                        response = CheckPassword(argument);
-                        break;
-                    case "CWD":
-                        response = ChangeWorkingDirectory(argument);
-                        break;
-                    case "CDUP":
-                        response = ChangeWorkingDirectory("..");
-                        break;
-                    case "QUIT":
-                        response = "221 Service closing control connection";
-                        break;
-                    case "PWD":
-                        response = PrintWorkingDirectory();
-                        break;
-                    case "TYPE":
-                        string[] args = argument.Split(' ');
-                        response = Type(args[0], args.Length > 1 ? args[1] : null);
-                        break;
-                    case "PORT":
-                        response = Port(argument);
-                        break;
-                    case "PASV":
-                        response = Passive();
-                        break;
-                    case "LIST":
-                        response = List(argument);
-                        break;
-                    case "RETR":
-                        response = Retrieve(argument);
-                        break;
-                    case "STOR":
-                        response = Store(argument);
-                        break;
-                    case "DELE":
-                        response = Delete(argument);
-                        break;
-                    case "MKD":
-                        response = MakeDirectory(argument);
-                        break;
-                    case "RMD":
-                        response = RemoveDirectoyy(argument);
-                        break;
-                    case "STRU":
-                        response = Structure(argument);
-                        break;
-                    case "MODE":
-                        response = Mode(argument);
-                        break;
-                    default:
-                        response = "502 Command not implemented";
-                        break;
+                    response = Response(cmd, argument);
                 }
+                else
+                {
+                    response = LoginResponse(cmd, argument);
+                }
+                
 
 
                 if (_client == null || !_client.Connected)
@@ -155,19 +188,20 @@ namespace ftp_server
 
         private string CheckUsername(string username)
         {
-            _username = username;
+            _user.Username = username;
 
             return "331 Username ok, need password";
         }
 
         private string CheckPassword(string password)
         {
-            _password = password;
+            _user.Password = password;
 
-            if (true)
+            if (Login.IsValidLogin(_user))
             {
-                _root = "E:\\";
-                _currentDirectory = _root;
+                _user.Root = "E:\\";
+                _currentDirectory = _user.Root;
+                _user.LoggedIn = true;
                 return "230 User logged in";
             }
             else
@@ -180,7 +214,7 @@ namespace ftp_server
         {
             if (pathname == "/")
             {
-                _currentDirectory = _root;
+                _currentDirectory = _user.Root;
             }
             else
             {
@@ -190,7 +224,7 @@ namespace ftp_server
                     if (pathname.StartsWith("/"))
                     {
                         pathname = pathname.Substring(1).Replace('/', '\\');
-                        newDir = Path.Combine(_root, pathname);
+                        newDir = Path.Combine(_user.Root, pathname);
                     }
                     else
                     {
@@ -210,13 +244,13 @@ namespace ftp_server
 
                     if (!IsPathValid(_currentDirectory))
                     {
-                        _currentDirectory = _root;
+                        _currentDirectory = _user.Root;
                         return "550 Can't access directory";
                     }
                 }
                 else
                 {
-                    _currentDirectory = _root;
+                    _currentDirectory = _user.Root;
                     return "550 Directory not found";
                 }
             }
@@ -349,10 +383,6 @@ namespace ftp_server
 
         private string List(string pathname)
         {
-            if (pathname != null && pathname.StartsWith("-"))
-            {
-                pathname = "";
-            }
             pathname = NormalizeFilename(pathname);
 
             if(pathname != null)
@@ -478,14 +508,15 @@ namespace ftp_server
             {
                 using (FileStream fs = new FileStream(pathname, FileMode.Open, FileAccess.Read))
                 {
-                    CopyStream(fs, dataStream);
+                    if(CopyStream(fs, dataStream) > 0)
+                    {
+                        _writer.WriteLine("226 Closing data connection, file transfer succesful");
+                        _writer.Flush();
+                    }
                 }
             }
             _dataClient.Close();
             _dataClient = null;
-
-            _writer.WriteLine("226 Closing data connection, file transfer succesful");
-            _writer.Flush();
         }
 
         private string Retrieve(string pathname)
@@ -539,7 +570,7 @@ namespace ftp_server
 
         private string PrintWorkingDirectory()
         {
-            string current = _currentDirectory.Replace(_root, string.Empty).Replace('\\', '/');
+            string current = _currentDirectory.Replace(_user.Root, string.Empty).Replace('\\', '/');
 
             if (current.Length == 0)
             {
@@ -573,8 +604,16 @@ namespace ftp_server
 
             while ((count = input.Read(buffer, 0, buffer.Length)) > 0)
             {
-                output.Write(buffer, 0, count);
-                total += count;
+                try
+                {
+                    output.Write(buffer, 0, count);
+                    total += count;
+                }
+                catch(IOException ioe)
+                {
+                    Console.WriteLine(ioe.Message);
+                    return -1; 
+                }                
             }
 
             return total;
@@ -610,11 +649,11 @@ namespace ftp_server
 
             if (path == "/")
             {
-                return _root;
+                return _user.Root;
             }
             else if (path.StartsWith("/"))
             {
-                path = new FileInfo(Path.Combine(_root, path.Substring(1))).FullName;
+                path = new FileInfo(Path.Combine(_user.Root, path.Substring(1))).FullName;
             }
             else
             {
@@ -633,7 +672,7 @@ namespace ftp_server
 
         private bool IsPathValid(string path)
         {
-            return path.StartsWith(_root);
+            return path.StartsWith(_user.Root);
         }
         
         #endregion
