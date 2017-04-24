@@ -721,9 +721,9 @@ namespace ftp_server
                 {
                     path = new FileInfo(Path.Combine(_currentDirectory, path)).FullName;
                 }
-                catch (ArgumentNullException)
+                catch (ArgumentException)
                 {
-
+                    return null;
                 }
             }
 
