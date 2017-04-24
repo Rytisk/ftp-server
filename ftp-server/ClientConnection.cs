@@ -29,6 +29,7 @@ namespace ftp_server
         private string _transferType;
         private string _currentDirectory;
         private bool _disposed;
+        private bool _passiveConn;
 
         #endregion
 
@@ -314,6 +315,8 @@ namespace ftp_server
 
         private string Port(string hostPort)
         {
+            _passiveConn = false;
+
             string[] ipAndPort = hostPort.Split(',');
 
             byte[] ipAddress = new byte[4];
@@ -341,6 +344,8 @@ namespace ftp_server
 
         private string Passive()
         {
+            _passiveConn = true;
+
             IPAddress localAddress = ((IPEndPoint)_client.Client.LocalEndPoint).Address;
 
             _passiveListener = new TcpListener(localAddress, 0);
@@ -479,7 +484,15 @@ namespace ftp_server
 
         private string HandleList(string pathname)
         {
-            _dataClient = _passiveListener.AcceptTcpClient();
+            if (_passiveConn)
+            {
+                _dataClient = _passiveListener.AcceptTcpClient();
+            }
+            else
+            {
+                _dataClient = new TcpClient(_dataEndpoint.AddressFamily);
+                _dataClient.Connect(_dataEndpoint.Address, _dataEndpoint.Port);
+            }
 
             using (NetworkStream stream = _dataClient.GetStream())
             {
@@ -539,7 +552,14 @@ namespace ftp_server
         {
             string pathname = res.AsyncState as string;
 
-            _dataClient = _passiveListener.EndAcceptTcpClient(res);
+            if (_passiveConn)
+            {
+                _dataClient = _passiveListener.EndAcceptTcpClient(res);
+            }
+            else
+            {
+                _dataClient.EndConnect(res);
+            }
 
             using (NetworkStream dataStream = _dataClient.GetStream())
             {
@@ -571,7 +591,15 @@ namespace ftp_server
             {
                 if(File.Exists(pathname))
                 {
-                    _passiveListener.BeginAcceptTcpClient(HandleRetrieve, pathname);
+                    if (_passiveConn)
+                    {
+                        _passiveListener.BeginAcceptTcpClient(HandleRetrieve, pathname);
+                    }
+                    else
+                    {
+                        _dataClient = new TcpClient(_dataEndpoint.AddressFamily);
+                        _dataClient.BeginConnect(_dataEndpoint.Address, _dataEndpoint.Port, HandleRetrieve, pathname);
+                    }
                     return "150 Opening Passive mode data transfer for RETR";
                 }
             }
@@ -584,7 +612,16 @@ namespace ftp_server
 
             if (pathname != null)
             {
-                _passiveListener.BeginAcceptTcpClient(HandleStore, pathname);
+                
+                if (_passiveConn)
+                {
+                    _passiveListener.BeginAcceptTcpClient(HandleStore, pathname);
+                }
+                else
+                {
+                    _dataClient = new TcpClient(_dataEndpoint.AddressFamily);
+                    _dataClient.BeginConnect(_dataEndpoint.Address, _dataEndpoint.Port, HandleStore, pathname);
+                }
 
                 return "150 Opening Passive mode data transfer for STOR";
             }
@@ -595,8 +632,15 @@ namespace ftp_server
         private void HandleStore(IAsyncResult res)
         {
             string pathname = res.AsyncState as string;
-
-            _dataClient = _passiveListener.EndAcceptTcpClient(res);
+            
+            if (_passiveConn)
+            {
+                _dataClient = _passiveListener.EndAcceptTcpClient(res);
+            }
+            else
+            {
+                _dataClient.EndConnect(res);
+            }
 
             using (NetworkStream dataStream = _dataClient.GetStream())
             {
