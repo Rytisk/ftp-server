@@ -222,7 +222,7 @@ namespace ftp_server
 
             if (Login.IsValidLogin(_user))
             {
-                _user.Root = "E:\\";
+                _user.Root = "D:\\";
                 _currentDirectory = _user.Root;
                 _user.LoggedIn = true;
                 return "230 User logged in";
@@ -346,9 +346,9 @@ namespace ftp_server
             if (BitConverter.IsLittleEndian)
                 Array.Reverse(port);
 
-            BitConverter.ToInt16(port, 0);
+            int prt = port[1] * 256 + port[0];
 
-            _dataEndpoint = new IPEndPoint(new IPAddress(ipAddress), BitConverter.ToInt16(port, 0));
+            _dataEndpoint = new IPEndPoint(new IPAddress(ipAddress), prt);
 
             return "200 Data Connection Established";
         }

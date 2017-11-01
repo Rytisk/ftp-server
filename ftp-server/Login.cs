@@ -9,7 +9,7 @@ namespace ftp_server
 {
     static class Login
     {
-        private static string _filePath = "E:\\Projects\\ftp-server\\ftp-server\\users\\users.xml";
+        private static string _filePath = "D:\\Projects\\ftp-server\\ftp-server\\users\\users.xml";
 
         public static bool IsValidLogin(User user)
         {
