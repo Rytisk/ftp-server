@@ -111,6 +111,7 @@ namespace ftp_server
         private string LoginResponse(string cmd, string argument)
         {
             string response = "";
+
             switch (cmd)
             {
                 case "USER":
@@ -196,7 +197,12 @@ namespace ftp_server
 
         private string CheckUsername(string username)
         {
-            if(Login.UsernameExists(username))
+            if (username == null)
+            {
+                return "530 Not logged in. Missing <username>";
+            }
+
+            if (Login.UsernameExists(username))
             {
                 _user.Username = username;
                 return "331 Username ok, need password";
@@ -208,6 +214,11 @@ namespace ftp_server
         private string CheckPassword(string password)
         {
             _user.Password = password;
+
+            if (password == null)
+            {
+                return "530 Not logged in. Missing <password>";
+            }
 
             if (Login.IsValidLogin(_user))
             {
